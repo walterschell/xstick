@@ -54,8 +54,13 @@ class XStick:
         return self.send_command("SH") + self.send_command("SL")
     def get_is_coordinator(self):
         return self.send_command("CE")
+    def set_coordinator(self, enabled=True):
+        mode = 1
+        if not enabled:
+            mode = 0
+        return self.send_command('CE %d' % mode)
     def get_active_scan(self, duration=2):
-        return self.get_listing("AS")
+        return self.get_listing("AS %d" %duration)
     def get_mac_mode(self):
         return self.send_command("MM")                        
     def get_node_discover(self):
@@ -66,6 +71,17 @@ class XStick:
         return self.send_command("VR")
     def get_firmware_version_verbose(self):
         return self.get_listing("VL")
+    def enable_802_15_4_mode(self, auto_ack = False):
+        mode = 1
+        if auto_ack:
+            mode = 2
+        return self.send_command('MM %d' % mode)
+    def set_name(self, name):
+        return self.send_command('NI %s' % name)
+    def get_name(self):
+        return self.send_command('NI')
+    def get_association_status(self):
+        return self.get_listing('AI')
 def main():
     xstick = XStick()
     xstick.enter_command_mode()
@@ -76,14 +92,21 @@ def main():
     print 'Channel: %s' % xstick.get_channel()
     print 'Set Channel: %s' % xstick.set_channel('10')
     print 'Serial: %s' % xstick.get_serial_number()
+    print xstick.set_coordinator(False)
     print 'Is Coordinator: %s' % xstick.get_is_coordinator()
+    print xstick.enable_802_15_4_mode()
     print 'MAC Mode: %s' % xstick.get_mac_mode()
     print 'Scan Channels: %s' % xstick.get_scan_channels()
+    print xstick.set_name('testing')
+    print 'Name: %s' % xstick.get_name()
     print 'Energy Detect'
     print '\n'.join(xstick.get_listing('ED'))
     print 'Active Scan'
     print '\n'.join(xstick.get_active_scan())
     print 'Node Discover'
     print '\n'.join(xstick.get_node_discover())
+    print 'Association Status: '
+    print '\n'.join(xstick.get_association_status())
+
 if __name__ == '__main__':
     main()
