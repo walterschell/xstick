@@ -5,9 +5,9 @@ newline = '\r'
 class XStick:
     def __init__(self, filename='/dev/ttyUSB0', speed = 9600):
         self.port = serial.Serial(filename, speed)
-        self.port.setTimeout(1)
-        self.port.setDTR(level = True)
-        self.port.setRTS(level = True)
+        self.port.timeout = 1
+        self.port.setDTR(value = 1)
+        self.port.setRTS(value = 1)
         self.port.flushInput()
         self.io = io.TextIOWrapper(io.BufferedRWPair(self.port, self.port, 1),  
                                newline = '\r',
