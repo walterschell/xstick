@@ -19,6 +19,7 @@ class XStick:
                                line_buffering = True)
         self.cached_pan_descriptors = []
         self.cached_scan_channel_dwell = 0
+        self.cached_scan_channels = 0
     def send(self, data):
         self.io.write(unicode(data))
         #Shouldn't need to do this but we do
@@ -55,6 +56,8 @@ class XStick:
         return lines
     def get_panid(self):
         return self.send_command("ID")
+    def set_panid(self, panid):
+        return self.send_command('ID %x' % panid)
     def get_channel(self):
         return self.send_command("CH")
     def set_channel(self, channel):
@@ -81,7 +84,16 @@ class XStick:
     def get_node_discover(self):
         return self.get_listing("ND")
     def get_scan_channels(self):
-	return self.send_command("SC")
+	result = self.send_command("SC")
+        self.cached_scan_channels = int(result, 16)
+        return result
+    def decode_scan_channels(self):
+        result = []
+        channel_base = 0xb
+        for i in range(16):
+            if self.cached_scan_channels & (1 << i):
+                result.append(channel_base + i)
+        return result
     def get_firmware_version(self):
         return self.send_command("VR")
     def get_firmware_version_verbose(self):
@@ -105,6 +117,21 @@ class XStick:
         return self.send_command('SD %x' % new_sd)
     def apply_changes(self):
         return self.send_command('AC')
+    def energy_detect(self, decode = True):
+        lines = self.get_listing('ED')
+        if not decode:
+            return lines
+        lines = map(lambda x: '-%d dBm' % int(x, 16), lines)
+        if not len(lines) == len(self.decode_scan_channels()):
+            return lines
+        for i in range(len(lines)):
+            lines[i] = '%d: %s' % (self.decode_scan_channels()[i], lines[i])
+        return lines
+    def attempt_join(self, descriptor):
+        self.set_panid(int(descriptor.CoordPanID, 16))
+        self.set_channel(descriptor.Channel)
+        self.send_command('A1 4')
+
 class PanDescriptor:
     def __init__(self, lines):
         if len(lines) != 11:
@@ -122,22 +149,38 @@ class PanDescriptor:
         self.SecurityUse = lines[4]
         self.ACLEntry = lines[5]
         self.SecurityFailure = lines[6]
-        self.SuperFrameSpec = lines[7]
+        self.SuperFrameSpecString = lines[7]
+        self.SuperFrameSpec = int(lines[7], 16)
         self.GtsPermit = lines[8]
         self.RSSI = lines[9]
         self.TimeStamp = lines[10]
+
+    def decode_super_frame_spec(self):
+        result = []
+        framespec = self.SuperFrameSpec
+        if framespec & 1:
+            result.append('Association Permitted')
+        else:
+            result.append('Associattion NOT permitted')
+        if framespec & (1 << 1):
+            result.append('PAN Coordinator')
+        else:
+            result.append('NOT PAN Coordinator')
+
+        return map(lambda x: '* %s' % x, result)
     def __str__(self):
         result = []
         result.append('Timestamp: %s' % self.TimeStamp)
+        result.append('Pan ID: %s' % self.CoordPanID)
         result.append('Coord Address: %s' % self.CoordAddress)
-        result.append('Coord Pan ID: %s' % self.CoordPanID)
         result.append('Coord Addr Mode: %s (%s)' % (self.CoordAddrModeString, self.CoordAddrMode))
         result.append('Channel: 0x%s (%d)' % (self.ChannelStr, self.Channel))
         result.append('RSSI: -%s dBm' % self.RSSI)
         result.append('Security Use: %s' % self.SecurityUse)
         result.append('ACLEntry: %s' % self.ACLEntry)
         result.append('SecurityFailure: %s' % self.SecurityFailure)
-        result.append('SuperFrameSpec: %s' % self.SuperFrameSpec)
+        result.append('SuperFrameSpec: %s' % self.SuperFrameSpecString)
+        result += self.decode_super_frame_spec()
         result.append('Gts Permit: %s' % self.GtsPermit)
         return '\n'.join(result)
 
@@ -155,27 +198,39 @@ def main():
     print 'Is Coordinator: %s' % xstick.get_is_coordinator()
     print xstick.enable_802_15_4_mode()
     print 'MAC Mode: %s' % xstick.get_mac_mode()
-    print 'Scan Channels: %s' % xstick.get_scan_channels()
+    print 'Scan Channels: %s (%s)' % (xstick.get_scan_channels(), xstick.decode_scan_channels())
     print 'Scan Duration: %s' % xstick.get_scan_duration()
     print 'Channel Dewll: %0.2f ms' % xstick.cached_channel_dwell
-    print 'Setting Scan duration to 8: %s' % xstick.set_scan_duration(10)
-    print 'Scan Duration: %s' % xstick.get_scan_duration()
-    print 'Channel Dewll: %0.2f ms' % xstick.cached_channel_dwell
+    #print 'Setting Scan duration to 8: %s' % xstick.set_scan_duration(12)
+    #print 'Scan Duration: %s' % xstick.get_scan_duration()
+    #print 'Channel Dewll: %0.2f ms' % xstick.cached_channel_dwell
     print xstick.set_name('testing')
     print 'Aplying changes... %s' % xstick.apply_changes()
     print 'Name: %s' % xstick.get_name()
     print 'Energy Detect'
-    print '\n'.join(xstick.get_listing('ED'))
+    print '\n'.join(xstick.energy_detect())
     print 'Active Scan'
-    print '\n'.join(xstick.get_active_scan())
+    print '\n'.join(xstick.get_active_scan(6))
     print 'Node Discover'
     print '\n'.join(xstick.get_node_discover())
     print 'Association Status: %s' % xstick.get_association_status()
-    xstick.exit_command_mode()
     for descriptor in xstick.cached_pan_descriptors:
         print '*** Pan Descriptor ***'
         print descriptor
         print
 
+    logfile_path = '/tmp/xstick.log'
+    print 'Entering scanning loop'
+    print 'tail -f %s' % logfile_path
+    with open(logfile_path, 'a') as fh:
+        while True:
+            fh.write('--- %s ---\n' % time.asctime())
+            print 'Scanning...',
+            xstick.get_active_scan(6)
+            print 'Done!'
+            for descriptor in xstick.cached_pan_descriptors:
+                fh.write('*** Pan Descriptor ***\n')
+                fh.write(str(descriptor))
+                fh.write('\n')
 if __name__ == '__main__':
     main()
